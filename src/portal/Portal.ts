@@ -120,19 +120,22 @@ export class Portal {
 	}
 
 	/**
-	 * Clone a world model into both viewports. The portal partner is
-	 * pruned from each viewport's lookup so neither window contains its
-	 * own partner.
+	 * Clone a world model into both viewports. The partner portal part
+	 * is excluded from each viewport's clone (so window A doesn't render
+	 * its partner sitting in front of it, and vice versa). It's safe to
+	 * pass a world model that contains the portal parts themselves —
+	 * cloneInto skips ViewportFrames automatically so the windows don't
+	 * recurse into themselves.
 	 *
 	 * Call once. Subsequent calls replace the world.
 	 */
 	setWorld(world: Model): void {
 		this.clearWorld();
 		this.world = world;
-		this.worldLookupA = this.windowA.cloneInto([world]);
-		this.worldLookupB = this.windowB.cloneInto([world]);
-		this.pruneFromLookup(this.worldLookupA, this.partB);
-		this.pruneFromLookup(this.worldLookupB, this.partA);
+		const excludeFromA = new Set<Instance>([this.partB]);
+		const excludeFromB = new Set<Instance>([this.partA]);
+		this.worldLookupA = this.windowA.cloneInto([world], undefined, undefined, undefined, excludeFromA);
+		this.worldLookupB = this.windowB.cloneInto([world], undefined, undefined, undefined, excludeFromB);
 	}
 
 	/** Clone a character into both viewports and sync each frame. */
@@ -284,14 +287,6 @@ export class Portal {
 		this.worldLookupA = undefined;
 		this.worldLookupB = undefined;
 		this.world = undefined;
-	}
-
-	private pruneFromLookup(lookup: Map<Instance, Instance>, target: Instance): void {
-		const clone = lookup.get(target);
-		if (clone) {
-			clone.Destroy();
-			lookup.delete(target);
-		}
 	}
 
 	private performTeleport(

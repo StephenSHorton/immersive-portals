@@ -116,22 +116,28 @@ export class PortalWindow {
 
 	/**
 	 * Clone a hierarchy into the world ViewportFrame, building a
-	 * real→clone lookup map. Scripts are skipped. Each clone has its
+	 * real→clone lookup map. Scripts and ViewportFrames are skipped
+	 * (the latter prevents unbounded recursion when a window's own
+	 * apparatus is a descendant of the cloned tree). Each clone has its
 	 * children cleared and is repopulated recursively, so the resulting
 	 * tree is a deep copy with no scripts attached.
 	 *
 	 * `cloneFunc(real, clone)` fires per cloned instance for custom mutation.
+	 * `exclude` skips specific instances and does not recurse into them.
 	 */
 	cloneInto(
 		children: ReadonlyArray<Instance>,
 		cloneFunc?: (real: Instance, clone: Instance) => void,
 		parent?: Instance,
 		lookup?: Map<Instance, Instance>,
+		exclude?: ReadonlySet<Instance>,
 	): Map<Instance, Instance> {
 		const map = lookup ?? new Map<Instance, Instance>();
 		const dest = parent ?? this.worldFrame;
 		for (const real of children) {
 			if (real.IsA("LuaSourceContainer")) continue;
+			if (real.IsA("ViewportFrame")) continue;
+			if (exclude?.has(real)) continue;
 			const wasArchivable = real.Archivable;
 			real.Archivable = true;
 			const clone = real.Clone();
@@ -140,7 +146,7 @@ export class PortalWindow {
 			clone.ClearAllChildren();
 			if (cloneFunc) cloneFunc(real, clone);
 			clone.Parent = dest;
-			this.cloneInto(real.GetChildren(), cloneFunc, clone, map);
+			this.cloneInto(real.GetChildren(), cloneFunc, clone, map, exclude);
 			map.set(real, clone);
 		}
 		return map;
