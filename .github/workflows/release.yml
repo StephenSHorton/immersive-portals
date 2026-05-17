@@ -1,0 +1,75 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update version and commit
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          CURRENT=$(npm pkg get version | tr -d '"')
+          NEW=${{ steps.version.outputs.version }}
+          HIGHEST=$(printf '%s\n%s\n' "$CURRENT" "$NEW" | sort -V | tail -1)
+          if [ "$CURRENT" = "$NEW" ]; then
+            echo "Version already $NEW — no bump needed"
+          elif [ "$HIGHEST" != "$NEW" ]; then
+            echo "main is at $CURRENT (>= tag $NEW) — backfill, skipping version bump"
+          else
+            npm pkg set version=$NEW
+            git add package.json
+            git commit -m "chore: update version to $NEW"
+            git push origin main
+          fi
+
+      - name: Publish to npm
+        run: |
+          PKG=$(npm pkg get name | tr -d '"')
+          VER=${{ steps.version.outputs.version }}
+          if npm view "${PKG}@${VER}" version > /dev/null 2>&1; then
+            echo "${PKG}@${VER} already on npm — skipping publish"
+          else
+            npm publish --provenance --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ''
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=${{ steps.version.outputs.version }}
+          if gh release view "v$VER" > /dev/null 2>&1; then
+            echo "Release v$VER already exists — skipping"
+          else
+            gh release create "v$VER" --title "v$VER" --generate-notes
+          fi

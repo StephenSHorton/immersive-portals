@@ -1,0 +1,46 @@
+{
+	"name": "@rbxts/immersive-portals",
+	"version": "0.1.0",
+	"description": "TypeScript-native immersive portal rendering for roblox-ts. Perspective-correct ViewportFrame windows, paired portal teleportation, and skybox proxies.",
+	"main": "out/init.luau",
+	"types": "out/index.d.ts",
+	"files": [
+		"out/**/*.luau",
+		"out/**/*.d.ts"
+	],
+	"keywords": [
+		"roblox",
+		"roblox-ts",
+		"@rbxts",
+		"portal",
+		"viewport",
+		"rendering",
+		"flamework"
+	],
+	"author": "StephenSHorton",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/StephenSHorton/immersive-portals.git"
+	},
+	"homepage": "https://github.com/StephenSHorton/immersive-portals#readme",
+	"bugs": {
+		"url": "https://github.com/StephenSHorton/immersive-portals/issues"
+	},
+	"scripts": {
+		"build": "rbxtsc",
+		"watch": "rbxtsc -w",
+		"prepublishOnly": "bun run build"
+	},
+	"dependencies": {
+		"@rbxts/maid": "^1.1.0",
+		"@rbxts/services": "^1.6.0",
+		"@rbxts/signal": "^1.1.1"
+	},
+	"devDependencies": {
+		"@rbxts/compiler-types": "^3.0.0-types.0",
+		"@rbxts/types": "^1.0.912",
+		"roblox-ts": "^3.0.0",
+		"typescript": "5.5.3"
+	}
+}
