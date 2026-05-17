@@ -209,6 +209,13 @@ export class PortalWindow {
 		const dy = (c2pYZ.Y / c2pYZ.Z) * h;
 		const d = math.abs(scale * refHeight * h);
 
+		// Guard against degenerate geometry (camera on the plane, zero surface size,
+		// etc.) that produces NaN/Inf. Assigning a NaN CFrame to Camera can hard-crash
+		// Roblox's render pipeline.
+		if (dx !== dx || dy !== dy || d !== d || dx === math.huge || dy === math.huge || d === math.huge) {
+			return;
+		}
+
 		const skewed = surfCF.Rotation.mul(Y_SPIN).mul(new CFrame(0, 0, 0, w, 0, 0, 0, h, 0, dx, dy, d));
 		const [px, py, pz, r00, r01, r02, r10, r11, r12, r20, r21, r22] = skewed.GetComponents();
 
@@ -223,6 +230,8 @@ export class PortalWindow {
 			math.abs(r21),
 			math.abs(r22),
 		);
+
+		if (max <= 0 || max !== max || max === math.huge) return;
 
 		const normalized = new CFrame(
 			px,
