@@ -216,10 +216,18 @@ export class PortalWindow {
 			return;
 		}
 
-		const skewed = surfCF.Rotation.mul(Y_SPIN).mul(new CFrame(0, 0, 0, w, 0, 0, 0, h, 0, dx, dy, d));
+		// Match original Lua exactly: (surfaceCF - surfaceCF.p) zeros the position, keeping rotation.
+		// Roblox-ts .Rotation should be equivalent but the original uses the sub form, so we match it
+		// to avoid any subtle precision difference.
+		const skewed = surfCF.sub(surfCF.Position).mul(Y_SPIN).mul(new CFrame(0, 0, 0, w, 0, 0, 0, h, 0, dx, dy, d));
 		const [px, py, pz, r00, r01, r02, r10, r11, r12, r20, r21, r22] = skewed.GetComponents();
 
+		// Match original normalization: max of ALL 12 abs components, but only divide the 9 rotation components.
+		// This produces the perspective skew that makes the surface look like a real window.
 		const max = math.max(
+			math.abs(px),
+			math.abs(py),
+			math.abs(pz),
 			math.abs(r00),
 			math.abs(r01),
 			math.abs(r02),

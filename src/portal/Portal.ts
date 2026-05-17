@@ -272,10 +272,13 @@ export class Portal {
 		this.syncCharacters();
 
 		const camThroughA = mirrorCFrameForCamera(workingCam, surfaceA, surfaceB);
-		this.windowA.render(camThroughA, surfaceB.mul(Y_SPIN), sizeB);
+		// The surface passed to render() represents the "window" in the virtual world the camera
+		// inhabits. Since the camera was mirrored into partner B's space, the window is the partner's
+		// surface. No Y_SPIN — both transforms cancel out cleanly when portals share an orientation.
+		this.windowA.render(camThroughA, surfaceB, sizeB);
 
 		const camThroughB = mirrorCFrameForCamera(workingCam, surfaceB, surfaceA);
-		this.windowB.render(camThroughB, surfaceA.mul(Y_SPIN), sizeA);
+		this.windowB.render(camThroughB, surfaceA, sizeA);
 
 		return { cframe: workingCam, focus: workingFocus };
 	}

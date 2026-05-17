@@ -43,13 +43,18 @@ export function segmentCrossesRect(
 }
 
 /**
- * Mirror a CFrame from one portal plane to its partner, suitable for moving
- * a camera through. Preserves the local orientation relative to the surface
- * and applies a 180° yaw so the view emerges out of the partner's front face.
+ * Mirror a CFrame from one portal plane to its partner, suitable for
+ * positioning a render camera that "looks through" portal A onto the world
+ * around portal B. No yaw flip — both portals contribute their orientation
+ * through their surface CFrames, so the math works regardless of whether
+ * the partners face the same direction or opposite directions.
+ *
+ * The teleport mirror is separate (see `mirrorCFrameForTeleport`) — that one
+ * needs the yaw flip to orient the exiting body correctly.
  */
 export function mirrorCFrameForCamera(cf: CFrame, planeA: CFrame, planeB: CFrame): CFrame {
 	const local_ = planeA.ToObjectSpace(cf);
-	return planeB.mul(Y_SPIN).mul(local_);
+	return planeB.mul(local_);
 }
 
 /**
