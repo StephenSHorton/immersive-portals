@@ -1,3 +1,16 @@
+export { Portal } from "./portal/Portal";
+export { PortalGroup } from "./portal/PortalGroup";
+export { PortalWindow } from "./window/PortalWindow";
+
+export { applyLightingToFrame, resolveLighting, snapshotLighting } from "./util/lighting";
+export {
+	mirrorCFrameForCamera,
+	mirrorCFrameForTeleport,
+	rayPlane,
+	segmentCrossesRect,
+} from "./util/mirror";
+export { createSkyboxModel } from "./util/skybox";
+
 export type {
 	LightingMode,
 	LightingSnapshot,

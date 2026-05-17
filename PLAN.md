@@ -8,64 +8,24 @@ Phased build of `@rbxts/immersive-portals`. Phases are gated — finish one befo
 - Public types declared in `src/types.ts`
 - Architecture committed to `CLAUDE.md`
 
-## Phase 1 — Layer 1: `PortalWindow`
+## Phase 1 — Layer 1: `PortalWindow` ✅
 
-The render primitive in isolation. No portal pairing, no teleportation.
+Implemented in `src/window/PortalWindow.ts`. `cloneInto`, `setSkybox`, `render`, `refreshLighting`, `destroy`. Surface info computed from adornee + face. Supporting utils: `util/skybox.ts`, `util/lighting.ts`.
 
-**Deliverables:**
-- `PortalWindow.new(adornee, normalId, config?)`
-- `:render(viewerCFrame)` — perspective-correct camera projection
-- `:setSkybox(sky | model | undefined)` — accepts `Sky` instance or pre-built `Model`
-- `:cloneInto(model, callback?)` — clone a world model into the WorldFrame, strip scripts, build a real→clone lookup
-- `:getAdornee()`, `:getSurfaceCFrame()`, `:getSurfaceSize()`
-- `:destroy()` — Maid teardown, no leaks
-- `util/skybox.ts` — port + simplify the current SkyboxModel construction
-- `util/lighting.ts` — `snapshotLighting()` + `applyLightingToFrame()` helpers
+## Phase 2 — Layer 2: `Portal` ✅
 
-**Acceptance:**
-- Drop a single `PortalWindow` on a Part in Shrink/Grow SIMULATOR. It shows a clone of a chosen Model with the player's correct perspective. No teleportation. No partner window.
-- Destroy it; verify zero leaked Instances via `:GetDescendants()` count on the SurfaceGui's adornee.
+Implemented in `src/portal/Portal.ts`. Owns two windows, drives mirror+teleport+render loop. Signals: `entered`, `exited`, `teleported`. `bind()/unbind()` for self-managed RenderStep, `update(camCF, focusCF)` for external orchestration. Supporting util: `util/mirror.ts` (rayPlane, segmentCrossesRect, mirrorCFrameForCamera, mirrorCFrameForTeleport).
 
-## Phase 2 — Layer 2: `Portal`
+## Phase 3 — Layer 3: `PortalGroup` ✅
 
-Pair two windows + teleportation.
-
-**Deliverables:**
-- `Portal.new(partA, partB, config?)`
-- Internally constructs two `PortalWindow`s facing each other
-- Mirrors viewer CFrame through each portal plane each frame; drives `:render` on each window
-- Optional `setViewer(humanoid | camera)` — enables teleportation
-- Plane-crossing detection with debounce
-- Camera-mirror when viewer's camera straddles the portal plane (the "see yourself through the back" effect)
-- Signals: `entered`, `exited`, `teleported(from: Vector3, to: Vector3)`
-- `util/mirror.ts` — `mirrorCFrameAcrossPair(cf, planeA, planeB, yawFlip)`, `mirrorVectorAcrossPlane(v, plane)`
-
-**Acceptance:**
-- Replace the current `Portal` ModuleScript in Shrink/Grow SIMULATOR with this library
-- Visual parity (or better) with the existing system
-- Confirmed leak-free across 10× create/destroy cycles
-- `Lighting.Sky` is never reparented by the library
-
-## Phase 3 — Layer 3: `PortalGroup`
-
-Bulk coordination.
-
-**Deliverables:**
-- `PortalGroup.new(config?)`
-- Auto-discovery via CollectionService tag + pairing attribute
-- One shared `RenderStepped` callback that drives all owned portals
-- `:addPortal(portal)`, `:removePortal(portal)`, `:attachWorld(model)`, `:setViewer(...)`, `:getStats()`
-- Late-added/removed portals handled gracefully (CollectionService `:GetInstanceAddedSignal`)
-
-**Acceptance:**
-- A map authored entirely in Studio (no per-portal code) with 4+ portal pairs all working from a single tag.
+Implemented in `src/portal/PortalGroup.ts`. Single shared RenderStep across owned portals. CollectionService auto-discovery via tag + pair attribute. `getStats()`.
 
 ## Phase 4 — Polish + Public Release
 
-- README with usage examples + lighting-tech limitations call-out
-- Test the full pipeline in a published build
-- Tag `v0.1.0` → release workflow publishes `@rbxts/immersive-portals` to npm
-- Update the navigate-style memory entry so future Claude knows this exists
+- [x] README with usage examples + lighting limitations
+- [ ] Verify the full pipeline by loading into Shrink/Grow SIMULATOR (or a fresh test project) and exercising both `Portal` and `PortalGroup`
+- [ ] Tag `v0.1.0` once verified → release workflow publishes `@rbxts/immersive-portals` to npm
+- [ ] Update memory entry once shipped
 
 ## Deferred / Open Questions
 
