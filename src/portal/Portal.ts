@@ -1,10 +1,22 @@
 import Maid from "@rbxts/maid";
 import Signal from "@rbxts/signal";
-import { RunService, Workspace } from "@rbxts/services";
+import { Players, RunService, Workspace } from "@rbxts/services";
 
 import type { PortalConfig } from "../types";
 import { mirrorCFrameForCamera, mirrorCFrameForTeleport, segmentCrossesRect, Y_SPIN } from "../util/mirror";
 import { PortalWindow } from "../window/PortalWindow";
+
+/**
+ * Resolve the parent for a portal's SurfaceGui. Roblox renders ViewportFrame
+ * children only when the SurfaceGui is parented under a PlayerGui — parenting
+ * the SurfaceGui directly to the BasePart causes plain Frames to render but
+ * leaves ViewportFrame content invisible. So default to LocalPlayer.PlayerGui.
+ */
+function defaultGuiParent(): Instance {
+	const player = Players.LocalPlayer;
+	assert(player, "Portal: no LocalPlayer — this library is client-only. Run portals from a client controller / LocalScript.");
+	return player.WaitForChild("PlayerGui");
+}
 
 let portalCounter = 0;
 
@@ -72,7 +84,7 @@ export class Portal {
 			teleportCooldown: config.teleportCooldown ?? 0.1,
 		};
 
-		const guiContainer = partA.FindFirstChildOfClass("SurfaceGui")?.Parent ?? partA;
+		const guiContainer = defaultGuiParent();
 		this.windowA = PortalWindow.fromPart(
 			partA,
 			config.surfaceA ?? Enum.NormalId.Front,
@@ -82,7 +94,7 @@ export class Portal {
 		this.windowB = PortalWindow.fromPart(
 			partB,
 			config.surfaceB ?? Enum.NormalId.Front,
-			partB.FindFirstChildOfClass("SurfaceGui")?.Parent ?? partB,
+			guiContainer,
 			config.windowB ?? {},
 		);
 
