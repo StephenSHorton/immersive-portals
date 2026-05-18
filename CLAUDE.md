@@ -21,7 +21,7 @@ bun run watch      # Watch mode
 
 Compiled output lands in `out/`. Consumer projects link to this package via a junction to `out/`.
 
-**Important:** Rojo does not detect file changes through Windows junctions. After rebuilding this package, restart Rojo in the consuming project for changes to take effect.
+**Consumer sync:** Use the [rojo-push](https://github.com/StephenSHorton/rojo-push) fork in consuming projects so library rebuilds propagate to Studio reliably across junctions. Run `rojo serve --no-watch` once, then `rojo push` after every `bun run build` here. No watcher = no missed events, no restarts.
 
 ## Architecture
 
