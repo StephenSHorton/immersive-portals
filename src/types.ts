@@ -10,10 +10,12 @@ export interface WindowConfig {
 	surface?: Enum.NormalId;
 	/** ViewportFrame canvas resolution. Defaults to 1024×1024. */
 	canvasSize?: Vector2;
-	/** Lighting source mode. Defaults to "manual". */
+	/** Lighting source mode. Defaults to "snapshot" — pulls Ambient, LightColor and sun direction from Lighting at construction so portals match the world. */
 	lightingMode?: LightingMode;
 	/** Used when lightingMode is "manual"; otherwise overrides snapshot/live values. */
 	ambient?: Color3;
+	/** Used when lightingMode is "manual"; otherwise overrides snapshot/live values. */
+	lightColor?: Color3;
 	/** Used when lightingMode is "manual"; otherwise overrides snapshot/live values. */
 	sunDirection?: Vector3;
 	/**
@@ -56,6 +58,7 @@ export interface PortalGroupConfig {
 /** Snapshot of lighting values that a PortalWindow consumes. */
 export interface LightingSnapshot {
 	ambient: Color3;
+	lightColor: Color3;
 	sunDirection: Vector3;
 }
 

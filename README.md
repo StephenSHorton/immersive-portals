@@ -126,11 +126,19 @@ ViewportFrames don't render `Atmosphere`, `Clouds`, or `Sky` natively. The libra
 
 | Mode | When to use |
 |---|---|
-| `"manual"` (default) | You set `ambient` + `sunDirection` yourself. Most predictable. |
-| `"snapshot"` | Sample `Lighting:GetSunDirection()` + `Lighting.Ambient` once at construction. Matches legacy ViewportFrame demos. |
+| `"snapshot"` (default) | Sample `Lighting.OutdoorAmbient`, `Lighting.ColorShift_Top`, and `Lighting:GetSunDirection()` once at construction. Best out-of-the-box match to the surrounding world. |
+| `"manual"` | You set `ambient` + `lightColor` + `sunDirection` yourself. Most predictable. |
 | `"live"` | Re-sample each frame. Use for day-night cycles. Slight cost per window. |
 
-**Limitation:** `Atmosphere` contributes most of the diffuse light under `Future` lighting tech. The viewport sees only the `ambient` scalar, so heavily-atmospheric scenes will look slightly mismatched between the real world and the viewport. No engine-supported workaround exists.
+## Limitations
+
+### No post-processing in viewports
+
+**Expect the portal view to look flatter than the main render.** ViewportFrame does not run any post-processing — no bloom, sun rays, depth of field, color correction, atmosphere scattering, or tonemapping — even when those effects are present in the parent place's `Lighting`. The library samples the three lighting inputs a ViewportFrame *does* support (`Ambient`, `LightColor`, `LightDirection`) and that's the ceiling Roblox gives us. A portal in a place with heavy atmosphere/bloom will read noticeably darker and less saturated than the world around it; no engine-supported workaround exists. Pre-multiplying `LightColor` to compensate just blows out highlights without restoring the missing effects, so the library intentionally doesn't do that — set expectations rather than fight the renderer.
+
+### No nested-portal recursion
+
+The Portal-game effect of one portal looking through itself into an infinite tunnel is **not possible** in Roblox. `ViewportFrame` doesn't render nested GUIs — if a partner portal part is visible in the cloned world, you see its bare geometry, not its viewport graphic. Roblox exposes no offscreen-render-to-texture or feedback-pass primitive, so true recursion can't be faked. Treat partner portals in view as flat surfaces.
 
 ## API surface
 

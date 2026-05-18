@@ -36,6 +36,8 @@ export class PortalWindow {
 	private camera: Camera;
 	private worldFrame: ViewportFrame;
 	private skyboxFrame: ViewportFrame;
+	private skyboxModel?: Model;
+	private skyboxBaseCFrames?: Map<BasePart, CFrame>;
 	private config: WindowConfig;
 	private liveMode: boolean;
 
@@ -111,9 +113,21 @@ export class PortalWindow {
 	 */
 	setSkybox(sky: Sky | undefined): void {
 		this.skyboxFrame.ClearAllChildren();
+		this.skyboxModel = undefined;
+		this.skyboxBaseCFrames = undefined;
 		if (sky) {
 			const model = createSkyboxModel(sky);
 			model.Parent = this.skyboxFrame;
+			this.skyboxModel = model;
+			// Cache each face's at-origin CFrame so render() can translate them by the
+			// camera position directly. PivotTo behaves unreliably inside a ViewportFrame
+			// (it can rigid-rotate the model based on internal pivot rotation), so we
+			// translate parts individually instead.
+			const cframes = new Map<BasePart, CFrame>();
+			for (const child of model.GetChildren()) {
+				if (child.IsA("BasePart")) cframes.set(child, child.CFrame);
+			}
+			this.skyboxBaseCFrames = cframes;
 		}
 	}
 
@@ -276,6 +290,15 @@ export class PortalWindow {
 		this.camera.FieldOfView = camera.FieldOfView;
 		this.camera.CFrame = finalCam;
 		this.camera.Focus = finalCam.mul(new CFrame(0, 0, viewerCFrame.PointToObjectSpace(surfCF.Position).Z));
+
+		// Keep the skybox cube centered on the synthetic camera so its faces always
+		// appear at infinity. We translate each face individually rather than calling
+		// Model:PivotTo, because PivotTo behaves unreliably inside a ViewportFrame.
+		if (this.skyboxBaseCFrames) {
+			for (const [part, baseCF] of this.skyboxBaseCFrames) {
+				part.CFrame = baseCF.add(finalCam.Position);
+			}
+		}
 	}
 
 	/** Re-sample lighting (Ambient + sun direction) and apply to both frames. */
@@ -296,7 +319,6 @@ export class PortalWindow {
 		frame.Position = new UDim2(0, 0, 0, 0);
 		frame.AnchorPoint = new Vector2(0, 0);
 		frame.ZIndex = zIndex;
-		frame.LightColor = new Color3(0, 0, 0);
 		frame.CurrentCamera = this.camera;
 		// Default: both layers fully transparent. Empty viewports show the part/world
 		// behind the SurfaceGui. Set `backdropColor` in the WindowConfig if you want the
