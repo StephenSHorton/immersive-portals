@@ -1,5 +1,5 @@
 import Maid from "@rbxts/maid";
-import { Workspace } from "@rbxts/services";
+import { CollectionService, Workspace } from "@rbxts/services";
 
 import type { WindowConfig } from "../types";
 import { applyLightingToFrame, resolveLighting } from "../util/lighting";
@@ -74,6 +74,9 @@ export class PortalWindow {
 		surfaceGui.Adornee = part;
 		surfaceGui.LightInfluence = 0;
 		surfaceGui.ClipsDescendants = true;
+		// PlayerGui's default ResetOnSpawn=true destroys the SurfaceGui on respawn,
+		// killing the portal. Disable when parented under PlayerGui.
+		surfaceGui.ResetOnSpawn = false;
 		surfaceGui.Parent = parent;
 		return new PortalWindow(surfaceGui, { ...config, surface });
 	}
@@ -137,6 +140,12 @@ export class PortalWindow {
 		for (const real of children) {
 			if (real.IsA("LuaSourceContainer")) continue;
 			if (real.IsA("ViewportFrame")) continue;
+			// Skip classes that ViewportFrame can't render or that shouldn't be cloned.
+			// Without this guard, `attachWorld(workspace)` would try to clone the live
+			// Camera (which Roblox treats specially) and Terrain (which can't be cloned
+			// inside a ViewportFrame at all).
+			if (real.IsA("Camera")) continue;
+			if (real.IsA("Terrain")) continue;
 			if (exclude?.has(real)) continue;
 			const wasArchivable = real.Archivable;
 			real.Archivable = true;
@@ -144,6 +153,13 @@ export class PortalWindow {
 			real.Archivable = wasArchivable;
 			if (!clone) continue;
 			clone.ClearAllChildren();
+			// Strip CollectionService tags from the clone. ViewportFrame contents are
+			// display-only — they shouldn't participate in tag-based systems. Without
+			// this, cloning tagged parts (e.g. portal parts inside a cloned World)
+			// fires GetInstanceAddedSignal endlessly and spams re-entrancy warnings.
+			for (const tag of CollectionService.GetTags(clone)) {
+				CollectionService.RemoveTag(clone, tag);
+			}
 			if (cloneFunc) cloneFunc(real, clone);
 			clone.Parent = dest;
 			this.cloneInto(real.GetChildren(), cloneFunc, clone, map, exclude);
@@ -279,10 +295,18 @@ export class PortalWindow {
 		frame.Size = new UDim2(1, 0, 1, 0);
 		frame.Position = new UDim2(0, 0, 0, 0);
 		frame.AnchorPoint = new Vector2(0, 0);
-		frame.BackgroundTransparency = 1;
 		frame.ZIndex = zIndex;
 		frame.LightColor = new Color3(0, 0, 0);
 		frame.CurrentCamera = this.camera;
+		// Default: both layers fully transparent. Empty viewports show the part/world
+		// behind the SurfaceGui. Set `backdropColor` in the WindowConfig if you want the
+		// skybox layer to fall back to an opaque color instead (useful for windows into
+		// a hidden room where you don't want the real world bleeding through).
+		frame.BackgroundTransparency = 1;
+		if (layer === "skybox" && this.config.backdropColor) {
+			frame.BackgroundTransparency = 0;
+			frame.BackgroundColor3 = this.config.backdropColor;
+		}
 		frame.Parent = this.surfaceGui;
 		this.config.customizeFrame?.(frame, layer);
 		return frame;

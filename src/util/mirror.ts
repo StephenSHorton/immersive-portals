@@ -18,13 +18,13 @@ export function rayPlane(
 
 /**
  * Whether the segment from `from`→`to` crosses the front of a rectangular
- * portal surface (CFrame at the surface center, X/Y axes spanning the rect,
- * forward = -LookVector). Used for both teleport detection (HRP segment) and
- * camera-mirror detection (focus→camera segment).
+ * portal surface, moving INTO the front face. Use for the camera-through-portal
+ * check (focus→camera segment): we only want the OffsetCam mirror to kick in
+ * when the camera is BEHIND the portal looking at the focus on the other side.
  *
- * Requires the segment to be moving INTO the portal's front face (dot < 0
- * with LookVector), to hit within the rect bounds, and to hit between the
- * endpoints (0 ≤ t ≤ 1).
+ * Requires the segment to be moving INTO the portal's front face (dot < 0 with
+ * LookVector), hit within the rect bounds, and hit between the endpoints
+ * (0 ≤ t ≤ 1).
  */
 export function segmentCrossesRect(
 	from: Vector3,
@@ -34,6 +34,24 @@ export function segmentCrossesRect(
 ): boolean {
 	const direction = to.sub(from);
 	if (direction.Dot(planeCFrame.LookVector) >= 0) return false;
+	return segmentCrossesRectBidirectional(from, to, planeCFrame, planeSize);
+}
+
+/**
+ * Direction-agnostic variant of `segmentCrossesRect`. Use for the teleport
+ * check (HRP segment): players should be able to walk into a portal from
+ * EITHER face — getting stuck because the part happens to be oriented Back-
+ * toward-the-spawn is a common authoring footgun.
+ */
+export function segmentCrossesRectBidirectional(
+	from: Vector3,
+	to: Vector3,
+	planeCFrame: CFrame,
+	planeSize: Vector3,
+): boolean {
+	const direction = to.sub(from);
+	const denominator = direction.Dot(planeCFrame.LookVector);
+	if (denominator === 0) return false;
 
 	const [hit, t] = rayPlane(from, direction, planeCFrame.Position, planeCFrame.LookVector);
 	if (t < 0 || t > 1) return false;
@@ -45,16 +63,16 @@ export function segmentCrossesRect(
 /**
  * Mirror a CFrame from one portal plane to its partner, suitable for
  * positioning a render camera that "looks through" portal A onto the world
- * around portal B. No yaw flip — both portals contribute their orientation
- * through their surface CFrames, so the math works regardless of whether
- * the partners face the same direction or opposite directions.
+ * around portal B. Applies a yaw flip (Y_SPIN) so that a viewer facing INTO
+ * portal A appears to be facing OUT of portal B's back — i.e., the camera on
+ * the partner side looks back through the partner's front, which is what
+ * makes the "magic window into the other room" effect work.
  *
- * The teleport mirror is separate (see `mirrorCFrameForTeleport`) — that one
- * needs the yaw flip to orient the exiting body correctly.
+ * Matches the original Lua: `planeB * Y_SPIN * planeA:ToObjectSpace(cf)`.
  */
 export function mirrorCFrameForCamera(cf: CFrame, planeA: CFrame, planeB: CFrame): CFrame {
 	const local_ = planeA.ToObjectSpace(cf);
-	return planeB.mul(local_);
+	return planeB.mul(Y_SPIN).mul(local_);
 }
 
 /**

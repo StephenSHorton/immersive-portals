@@ -3,7 +3,13 @@ import Signal from "@rbxts/signal";
 import { Players, RunService, Workspace } from "@rbxts/services";
 
 import type { PortalConfig } from "../types";
-import { mirrorCFrameForCamera, mirrorCFrameForTeleport, segmentCrossesRect, Y_SPIN } from "../util/mirror";
+import {
+	mirrorCFrameForCamera,
+	mirrorCFrameForTeleport,
+	segmentCrossesRect,
+	segmentCrossesRectBidirectional,
+	Y_SPIN,
+} from "../util/mirror";
 import { PortalWindow } from "../window/PortalWindow";
 
 /**
@@ -28,8 +34,23 @@ interface CharacterEntry {
 type PortalSide = "A" | "B";
 
 interface UpdateResult {
+	/**
+	 * Visual camera CFrame — the OffsetCam-adjusted value to display this frame.
+	 * Apply this to `workspace.CurrentCamera.CFrame`.
+	 */
 	cframe: CFrame;
+	/** Visual focus to display this frame. */
 	focus: CFrame;
+	/**
+	 * Raw camera CFrame BEFORE the camera-through-portal OffsetCam mirror was applied.
+	 * Use this as the next-frame BeforeInput restoration target so CameraModule's
+	 * internal state stays consistent across frames (the visual offset is re-applied
+	 * each frame in AfterCamera). If you display this instead of `cframe`, you skip
+	 * the camera-through-portal effect entirely.
+	 */
+	rawCFrame: CFrame;
+	/** Raw focus matching `rawCFrame`. */
+	rawFocus: CFrame;
 }
 
 /**
@@ -60,9 +81,10 @@ export class Portal {
 	private teleportTick = 0;
 	private inside: Map<PortalSide, boolean> = new Map();
 
-	private world?: Model;
+	private world?: Instance;
 	private worldLookupA?: Map<Instance, Instance>;
 	private worldLookupB?: Map<Instance, Instance>;
+	private worldMaid?: Maid;
 	private characterLookups = new Map<Model, CharacterEntry>();
 
 	private lastCameraCFrame: CFrame;
@@ -139,15 +161,62 @@ export class Portal {
 	 * cloneInto skips ViewportFrames automatically so the windows don't
 	 * recurse into themselves.
 	 *
+	 * Pass `extraExclude` to skip additional instances (e.g. characters that are
+	 * cloned separately via `addCharacter`, so they don't appear twice).
+	 *
 	 * Call once. Subsequent calls replace the world.
+	 *
+	 * The clone is kept in sync with the world's direct children: anything added
+	 * to `world` later will appear in the viewports automatically (DescendantAdded
+	 * inside an already-cloned subtree is NOT tracked — call `setWorld` again to
+	 * pick up deep additions).
 	 */
-	setWorld(world: Model): void {
+	setWorld(world: Instance, extraExclude?: ReadonlySet<Instance>): void {
 		this.clearWorld();
 		this.world = world;
 		const excludeFromA = new Set<Instance>([this.partB]);
 		const excludeFromB = new Set<Instance>([this.partA]);
+		if (extraExclude) {
+			for (const inst of extraExclude) {
+				excludeFromA.add(inst);
+				excludeFromB.add(inst);
+			}
+		}
 		this.worldLookupA = this.windowA.cloneInto([world], undefined, undefined, undefined, excludeFromA);
 		this.worldLookupB = this.windowB.cloneInto([world], undefined, undefined, undefined, excludeFromB);
+
+		// Watch the top-level world children. ChildAdded/Removed fires when the
+		// user adds scenery after init, which used to require a manual re-snapshot.
+		const worldMaid = new Maid();
+		this.worldMaid = worldMaid;
+		worldMaid.GiveTask(
+			world.ChildAdded.Connect((inst) => this.onWorldChildAdded(inst, excludeFromA, excludeFromB)),
+		);
+		worldMaid.GiveTask(
+			world.ChildRemoved.Connect((inst) => this.onWorldChildRemoved(inst)),
+		);
+	}
+
+	private onWorldChildAdded(
+		inst: Instance,
+		excludeFromA: ReadonlySet<Instance>,
+		excludeFromB: ReadonlySet<Instance>,
+	): void {
+		const cloneRootA = this.worldLookupA?.get(this.world!);
+		const cloneRootB = this.worldLookupB?.get(this.world!);
+		if (cloneRootA && this.worldLookupA) {
+			this.windowA.cloneInto([inst], undefined, cloneRootA, this.worldLookupA, excludeFromA);
+		}
+		if (cloneRootB && this.worldLookupB) {
+			this.windowB.cloneInto([inst], undefined, cloneRootB, this.worldLookupB, excludeFromB);
+		}
+	}
+
+	private onWorldChildRemoved(inst: Instance): void {
+		this.worldLookupA?.get(inst)?.Destroy();
+		this.worldLookupA?.delete(inst);
+		this.worldLookupB?.get(inst)?.Destroy();
+		this.worldLookupB?.delete(inst);
 	}
 
 	/** Clone a character into both viewports and sync each frame. */
@@ -237,11 +306,11 @@ export class Portal {
 		if (this.hrp && this.humanoid && this.lastHrpPosition) {
 			const now = os.clock();
 			if (now - this.teleportTick > this.config.teleportCooldown) {
-				if (segmentCrossesRect(this.lastHrpPosition, this.hrp.Position, surfaceA, sizeA)) {
+				if (segmentCrossesRectBidirectional(this.lastHrpPosition, this.hrp.Position, surfaceA, sizeA)) {
 					[workingCam, workingFocus] = this.performTeleport(workingCam, workingFocus, surfaceA, surfaceB);
 					this.teleportTick = now;
 					this.teleported.Fire("A", "B");
-				} else if (segmentCrossesRect(this.lastHrpPosition, this.hrp.Position, surfaceB, sizeB)) {
+				} else if (segmentCrossesRectBidirectional(this.lastHrpPosition, this.hrp.Position, surfaceB, sizeB)) {
 					[workingCam, workingFocus] = this.performTeleport(workingCam, workingFocus, surfaceB, surfaceA);
 					this.teleportTick = now;
 					this.teleported.Fire("B", "A");
@@ -250,37 +319,47 @@ export class Portal {
 			this.lastHrpPosition = this.hrp.Position;
 		}
 
-		this.lastCameraCFrame = workingCam;
-		this.lastCameraFocus = workingFocus;
+		// Snapshot the RAW (pre-OffsetCam) cam/focus. This is what next frame's BeforeInput
+		// restores so CameraModule keeps a consistent view of the world: the OffsetCam mirror
+		// is purely visual and gets re-derived every frame. Matches the original Lua which
+		// stores LastCameraCFrame BEFORE the OffsetCam if/elseif.
+		const rawCam = workingCam;
+		const rawFocus = workingFocus;
+		this.lastCameraCFrame = rawCam;
+		this.lastCameraFocus = rawFocus;
 
+		// Camera-through-portal: when the line from focus (character) to camera crosses
+		// a portal plane, the camera is "behind" that portal looking at the focus on the
+		// other side. Mirror the camera through to the partner so the rendered viewport
+		// aligns and the player keeps seeing their character. Mutually exclusive — if/elseif
+		// matches the original; using two independent `if`s would let A's mirror feed into
+		// B's check and cancel itself out.
+		let insideA = false;
+		let insideB = false;
 		if (segmentCrossesRect(workingFocus.Position, workingCam.Position, surfaceA, sizeA)) {
 			workingCam = mirrorCFrameForCamera(workingCam, surfaceA, surfaceB);
 			workingFocus = mirrorCFrameForCamera(workingFocus, surfaceA, surfaceB);
-			this.markInside("A", true);
-		} else {
-			this.markInside("A", false);
-		}
-
-		if (segmentCrossesRect(workingFocus.Position, workingCam.Position, surfaceB, sizeB)) {
+			insideA = true;
+		} else if (segmentCrossesRect(workingFocus.Position, workingCam.Position, surfaceB, sizeB)) {
 			workingCam = mirrorCFrameForCamera(workingCam, surfaceB, surfaceA);
 			workingFocus = mirrorCFrameForCamera(workingFocus, surfaceB, surfaceA);
-			this.markInside("B", true);
-		} else {
-			this.markInside("B", false);
+			insideB = true;
 		}
+		this.markInside("A", insideA);
+		this.markInside("B", insideB);
 
 		this.syncCharacters();
 
+		// Surface passed to render() must match the frame the mirrored camera lives in. Since
+		// mirrorCFrameForCamera applies Y_SPIN (planeB * Y_SPIN * local_), the surface we treat as
+		// the "window" is the partner's surface also Y-spun. Matches original Lua exactly.
 		const camThroughA = mirrorCFrameForCamera(workingCam, surfaceA, surfaceB);
-		// The surface passed to render() represents the "window" in the virtual world the camera
-		// inhabits. Since the camera was mirrored into partner B's space, the window is the partner's
-		// surface. No Y_SPIN — both transforms cancel out cleanly when portals share an orientation.
-		this.windowA.render(camThroughA, surfaceB, sizeB);
+		this.windowA.render(camThroughA, surfaceB.mul(Y_SPIN), sizeB);
 
 		const camThroughB = mirrorCFrameForCamera(workingCam, surfaceB, surfaceA);
-		this.windowB.render(camThroughB, surfaceA, sizeA);
+		this.windowB.render(camThroughB, surfaceA.mul(Y_SPIN), sizeA);
 
-		return { cframe: workingCam, focus: workingFocus };
+		return { cframe: workingCam, focus: workingFocus, rawCFrame: rawCam, rawFocus };
 	}
 
 	destroy(): void {
@@ -291,6 +370,8 @@ export class Portal {
 	}
 
 	private clearWorld(): void {
+		this.worldMaid?.DoCleaning();
+		this.worldMaid = undefined;
 		if (this.worldLookupA) {
 			this.worldLookupA.get(this.world!)?.Destroy();
 			this.worldLookupA.clear();
@@ -324,6 +405,11 @@ export class Portal {
 		humanoid.Move(newHRP.VectorToWorldSpace(localMoveDir));
 		this.lastHrpPosition = hrp.Position;
 
+		// Mirror cam+focus through the portal too. This isn't to "move the camera with the
+		// character" — it's so that the post-teleport segmentCrossesRect check below sees
+		// the mirrored cam crossing the partner portal's plane and mirrors it BACK,
+		// netting out to the camera staying in world space. Without this round-trip,
+		// CameraModule's character-follow kicks in next frame and yanks the camera over.
 		const newCam = mirrorCFrameForCamera(camCF, from, to);
 		const newFocus = mirrorCFrameForCamera(focusCF, from, to);
 		return [newCam, newFocus];

@@ -8,6 +8,7 @@ export {
 	mirrorCFrameForTeleport,
 	rayPlane,
 	segmentCrossesRect,
+	segmentCrossesRectBidirectional,
 } from "./util/mirror";
 export { createSkyboxModel } from "./util/skybox";
 

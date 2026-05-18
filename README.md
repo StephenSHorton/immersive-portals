@@ -73,6 +73,53 @@ group.bind();
 
 Studio authoring: tag two `BasePart`s with `ImmersivePortal`, set the `PortalPair` attribute to the same string on both, optionally set `PortalFace`. Done.
 
+## Authoring gotchas
+
+A short list of things that will burn you exactly once if you don't know them up front.
+
+### Portal orientation
+
+Each portal part has a Front face (the `+LookVector` side). The library mounts the `SurfaceGui` on that face by default. **Walk-through detection accepts entry from either face** — the segment-cross check is bidirectional — but the visual viewport only renders on the Front. If you stand in front of the Back face you'll see the unadorned part instead of the portal effect, even though walking into it still teleports you.
+
+Place portals with their Fronts facing where players approach. In a script:
+```ts
+portalPart.CFrame = CFrame.lookAt(portalPart.Position, somewhereTowardSpawn);
+```
+
+### Mirror math assumes the "doorway" model
+
+The internal mirror applies a 180° yaw flip (Y_SPIN), which is the standard portal-physics convention: walking INTO portal A means walking OUT of portal B, facing-direction inverted. For partner portals oriented to face each other ("doorways"), this gives the natural effect.
+
+If your partners face the SAME direction (parallel), the mirror still works but the viewport camera lands BEHIND the partner part — so the viewport shows whatever is on the partner's back side. **Put scenery there**, or the viewport will read as empty/sky-only.
+
+### Character cloning needs a fully loaded character
+
+`Player.CharacterAdded` fires the moment the Model is parented to Workspace, *before* body parts and accessories replicate. Calling `portal.addCharacter` at that instant clones a Shirt+Humanoid stub.
+
+```ts
+const bindCharacter = (character: Model) => {
+  character.WaitForChild("Humanoid");
+  character.WaitForChild("HumanoidRootPart");
+  if (!player.HasAppearanceLoaded()) player.CharacterAppearanceLoaded.Wait();
+  // now safe
+  for (const portal of group.getPortals()) portal.addCharacter(character);
+};
+```
+
+### SurfaceGui must be parented to PlayerGui
+
+`ViewportFrame` content does not render when its SurfaceGui is parented to a `BasePart` directly — only Frames render in that case. `PortalWindow.fromPart` already handles this by defaulting the parent to `LocalPlayer.PlayerGui`, but if you construct a `PortalWindow` from a pre-existing SurfaceGui, parent it under PlayerGui yourself. The library also sets `ResetOnSpawn = false` on the SurfaceGui so it survives respawns.
+
+### Tag stripping on cloned descendants
+
+`cloneInto` strips CollectionService tags from clones it produces. ViewportFrame contents are display-only; leaving tags on them re-fires `GetInstanceAddedSignal` for the auto-discovery layer and can cascade into an exponential portal-creation loop. If you want tagged clones, copy the tag back inside `cloneFunc`.
+
+### `World` for `attachWorld` can be a Folder or Model
+
+The signature accepts any `Instance`. The library clones its children recursively. Putting your portal scene in a `Folder` named `World` and pointing `attachWorld` at it is the simplest pattern.
+
+Top-level children added to the world after `attachWorld` are auto-synced via `ChildAdded`/`ChildRemoved`. Deep additions (descendants of an already-cloned subtree) are NOT — call `setWorld`/`attachWorld` again to re-snapshot those.
+
 ## Lighting
 
 ViewportFrames don't render `Atmosphere`, `Clouds`, or `Sky` natively. The library provides a manual skybox proxy and exposes `lightingMode`:
@@ -94,7 +141,8 @@ Pure functions:
 - `createSkyboxModel(sky | config)` — `Sky` or `SkyboxConfig` → 3-part skybox `Model`
 - `mirrorCFrameForCamera(cf, planeA, planeB)`, `mirrorCFrameForTeleport(cf, planeA, planeB)`
 - `rayPlane(origin, direction, planePoint, planeNormal)`
-- `segmentCrossesRect(from, to, planeCFrame, planeSize)`
+- `segmentCrossesRect(from, to, planeCFrame, planeSize)` (one-way; used for camera-through-portal)
+- `segmentCrossesRectBidirectional(from, to, planeCFrame, planeSize)` (used for teleport)
 - `snapshotLighting()`, `resolveLighting(config)`, `applyLightingToFrame(frame, snapshot)`
 
 Types:

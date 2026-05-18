@@ -17,6 +17,13 @@ export interface WindowConfig {
 	/** Used when lightingMode is "manual"; otherwise overrides snapshot/live values. */
 	sunDirection?: Vector3;
 	/**
+	 * BackgroundColor3 of the SkyboxFrame ViewportFrame, used when nothing in the
+	 * skybox layer covers a given pixel (no Sky set, or scene has gaps). Defaults to
+	 * a pale blue so empty viewports degrade to "open sky" rather than pitch black.
+	 * Set explicitly to `Color3.new(0, 0, 0)` if you want black.
+	 */
+	backdropColor?: Color3;
+	/**
 	 * Hook for consumers to mutate either internal ViewportFrame post-construction
 	 * (e.g. tweak LightColor, add custom child instances).
 	 */

@@ -1,5 +1,5 @@
 import Maid from "@rbxts/maid";
-import { CollectionService, RunService, Workspace } from "@rbxts/services";
+import { CollectionService, Lighting, RunService, Workspace } from "@rbxts/services";
 
 import type { PortalConfig, PortalGroupConfig } from "../types";
 import { Portal } from "./Portal";
@@ -29,7 +29,8 @@ export class PortalGroup {
 	private config: Required<PortalGroupConfig>;
 	private bound = false;
 	private humanoid?: Humanoid;
-	private world?: Model;
+	private world?: Instance;
+	private characters = new Set<Model>();
 	private autoDiscoveryActive = false;
 	private discoveredByPart = new Map<BasePart, Portal>();
 	private discoveredByPairKey = new Map<string, BasePart>();
@@ -49,7 +50,23 @@ export class PortalGroup {
 		if (this.portals.has(portal)) return;
 		this.portals.add(portal);
 		if (this.humanoid) portal.setHumanoid(this.humanoid);
-		if (this.world) portal.setWorld(this.world);
+		if (this.world) portal.setWorld(this.world, this.characters);
+		// Auto-clone tracked characters into newly-added portals. Without this, a
+		// character that registered before the portal was discovered (common when
+		// auto-discovery completes after CharacterAdded fires) wouldn't appear in
+		// the new portal's viewport.
+		for (const character of this.characters) portal.addCharacter(character);
+		// Auto-configure skybox per window. Priority:
+		//   1. partA/partB has a Sky child (legacy pattern from Shrink/Grow Studio:
+		//      window-A renders partB's Sky and vice versa, so each side sees the
+		//      sky of the other portal's destination).
+		//   2. Otherwise fall back to Lighting:FindFirstChildOfClass("Sky") so the
+		//      viewports inherit the game's real sky for free.
+		const partASky = portal.getPartA().FindFirstChildOfClass("Sky");
+		const partBSky = portal.getPartB().FindFirstChildOfClass("Sky");
+		const lightingSky = Lighting.FindFirstChildOfClass("Sky");
+		portal.getWindowA().setSkybox(partBSky ?? lightingSky);
+		portal.getWindowB().setSkybox(partASky ?? lightingSky);
 	}
 
 	removePortal(portal: Portal, destroyPortal = false): void {
@@ -63,10 +80,37 @@ export class PortalGroup {
 		for (const portal of this.portals) portal.setHumanoid(humanoid);
 	}
 
-	/** Clone this model into every owned portal's viewports. */
-	attachWorld(world: Model): void {
+	/**
+	 * Register a character to be cloned into every owned portal's viewport, including
+	 * portals that join the group later. The library auto-tracks character lifetime
+	 * (drops the registration on Destroying) so consumers don't need to call
+	 * `removeCharacter` themselves.
+	 */
+	addCharacter(character: Model): void {
+		if (this.characters.has(character)) return;
+		this.characters.add(character);
+		for (const portal of this.portals) portal.addCharacter(character);
+		this.maid.GiveTask(
+			character.Destroying.Connect(() => {
+				this.characters.delete(character);
+				for (const portal of this.portals) portal.removeCharacter(character);
+			}),
+		);
+	}
+
+	removeCharacter(character: Model): void {
+		if (!this.characters.delete(character)) return;
+		for (const portal of this.portals) portal.removeCharacter(character);
+	}
+
+	/**
+	 * Clone this instance (Model or Folder) into every owned portal's viewports.
+	 * You can pass `workspace` itself — Camera, Terrain, and any characters tracked
+	 * via `addCharacter` are automatically excluded so they don't clone twice.
+	 */
+	attachWorld(world: Instance): void {
 		this.world = world;
-		for (const portal of this.portals) portal.setWorld(world);
+		for (const portal of this.portals) portal.setWorld(world, this.characters);
 	}
 
 	/**
@@ -102,16 +146,21 @@ export class PortalGroup {
 		if (this.bound) return;
 		this.bound = true;
 
-		let lastCFrame: CFrame | undefined;
-		let lastFocus: CFrame | undefined;
+		// Track RAW (pre-OffsetCam) state to restore in BeforeInput. The OffsetCam mirror
+		// is a per-frame visual layer — if we cached the post-OffsetCam value here, CameraModule
+		// would start each frame from a moved camera and the visual would oscillate. The
+		// original Lua portal does exactly this split (LastCameraCFrame is assigned BEFORE the
+		// OffsetCam if-block, but workspace.CurrentCamera.CFrame is set AFTER).
+		let lastRawCFrame: CFrame | undefined;
+		let lastRawFocus: CFrame | undefined;
 		const beforeName = `PortalGroup${this.bindingId}_BeforeInput`;
 		const afterName = `PortalGroup${this.bindingId}_AfterCamera`;
 
 		RunService.BindToRenderStep(beforeName, Enum.RenderPriority.Input.Value - 1, () => {
 			const camera = Workspace.CurrentCamera;
-			if (!camera || !lastCFrame || !lastFocus) return;
-			camera.CFrame = lastCFrame;
-			camera.Focus = lastFocus;
+			if (!camera || !lastRawCFrame || !lastRawFocus) return;
+			camera.CFrame = lastRawCFrame;
+			camera.Focus = lastRawFocus;
 		});
 
 		RunService.BindToRenderStep(afterName, Enum.RenderPriority.Camera.Value + 1, () => {
@@ -120,16 +169,20 @@ export class PortalGroup {
 
 			let workingCam = camera.CFrame;
 			let workingFocus = camera.Focus;
+			let rawCam = workingCam;
+			let rawFocus = workingFocus;
 			for (const portal of this.portals) {
 				const result = portal.update(workingCam, workingFocus);
 				workingCam = result.cframe;
 				workingFocus = result.focus;
+				rawCam = result.rawCFrame;
+				rawFocus = result.rawFocus;
 			}
 
 			camera.CFrame = workingCam;
 			camera.Focus = workingFocus;
-			lastCFrame = workingCam;
-			lastFocus = workingFocus;
+			lastRawCFrame = rawCam;
+			lastRawFocus = rawFocus;
 		});
 
 		this.maid.GiveTask(() => {
@@ -166,6 +219,12 @@ export class PortalGroup {
 
 	private tryRegister(part: BasePart): void {
 		if (this.discoveredByPart.has(part)) return;
+		// Roblox's Clone() copies CollectionService tags. When setWorld clones a world
+		// containing tagged portal parts into a ViewportFrame, the clones still bear the
+		// tag and would re-fire GetInstanceAddedSignal, recursively creating new portals
+		// that clone the world again — an exponential cascade. Restrict discovery to real
+		// workspace descendants so viewport clones are ignored.
+		if (!part.IsDescendantOf(Workspace)) return;
 		const pairKey = part.GetAttribute(this.config.pairAttribute);
 		if (typeIs(pairKey, "string") === false) return;
 		const key = pairKey as string;

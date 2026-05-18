@@ -33,7 +33,10 @@ function buildBaseFace(scale: Vector3): Part {
 }
 
 function isSkyboxConfig(source: Sky | SkyboxConfig): source is SkyboxConfig {
-	return "faces" in source;
+	// A Roblox Instance throws when you index a property it doesn't declare, so
+	// `"faces" in source` blows up for a `Sky`. Tell them apart via typeIs: a
+	// plain table config is `"table"`, an Instance is `"Instance"`.
+	return typeIs(source, "table");
 }
 
 /**
