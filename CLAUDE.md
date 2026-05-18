@@ -75,8 +75,10 @@ const portal = new Portal(partA, partB, {
   teleportCooldown: 0.1,
 });
 portal.setWorld(workspace.PortalScene);
-portal.setViewer(localPlayer.Character!.Humanoid);
+portal.setHumanoid(localPlayer.Character!.Humanoid);
+portal.addCharacter(localPlayer.Character!);
 portal.teleported.Connect((from, to) => print("crossed"));
+portal.bind();
 ```
 
 ### Layer 3 — `PortalGroup`
@@ -88,9 +90,12 @@ const group = new PortalGroup({
   autoDiscoverTag: "ImmersivePortal",
   pairAttribute: "PortalPair",    // parts with matching string value pair up
   faceAttribute: "PortalFace",    // optional NormalId override per part
+  defaultPortalConfig: { teleportCooldown: 0.2 }, // applied to every discovered pair
 });
-group.setViewer(localPlayer.Character!.Humanoid);
-group.attachWorld(workspace.PortalScene);
+group.enableAutoDiscovery();
+group.setWorld(workspace.PortalScene);
+group.trackAllPlayers(); // wires up Players.PlayerAdded + CharacterAdded + setHumanoid for local
+group.bind();
 ```
 
 ## Key Design Decisions
@@ -120,8 +125,8 @@ In this library:
 The current `ViewportWindow.lua` samples `Lighting:GetSunDirection()` and `Lighting.Ambient` once at construction and never refreshes. Under modern lighting techs (especially `Future` + `Atmosphere`), `Ambient` alone is a poor approximation of the real scene because Atmosphere contributes most of the diffuse light — and Atmosphere doesn't render inside `ViewportFrame`.
 
 We expose `lightingMode`:
-- `"manual"` *(default)* — consumer sets `ambient` and `sunDirection` explicitly. Most predictable.
-- `"snapshot"` — sample `Lighting` once at construction (current behavior — preserve for parity).
+- `"snapshot"` *(default)* — sample `Lighting.OutdoorAmbient`, `Lighting.ColorShift_Top`, and `Lighting:GetSunDirection()` once at construction. Best out-of-box match to the surrounding world.
+- `"manual"` — consumer sets `ambient`, `lightColor`, and `sunDirection` explicitly. Most predictable.
 - `"live"` — re-sample each frame. Use for day-night cycles. Slight cost.
 
 Plus `:refreshLighting()` for manual one-shot updates.
@@ -194,10 +199,10 @@ export class PortalController implements OnStart {
   private group = new PortalGroup({ autoDiscoverTag: "ImmersivePortal" });
 
   onStart() {
-    Players.LocalPlayer.CharacterAdded.Connect((char) => {
-      this.group.setViewer(char.WaitForChild("Humanoid") as Humanoid);
-    });
-    this.group.attachWorld(Workspace.PortalScene);
+    this.group.enableAutoDiscovery();
+    this.group.setWorld(Workspace.WaitForChild("World"));
+    this.group.trackAllPlayers();
+    this.group.bind();
   }
 }
 ```

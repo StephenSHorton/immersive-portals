@@ -53,6 +53,12 @@ export interface PortalGroupConfig {
 	pairAttribute?: string;
 	/** Attribute name carrying the surface NormalId (number). Defaults to "PortalFace". */
 	faceAttribute?: string;
+	/**
+	 * Default PortalConfig fields (e.g. `teleportCooldown`, `windowA`, `windowB`)
+	 * applied to every auto-discovered Portal. Per-pair attribute overrides take
+	 * precedence over these defaults where they overlap (e.g. surfaceA/B).
+	 */
+	defaultPortalConfig?: PortalConfig;
 }
 
 /** Snapshot of lighting values that a PortalWindow consumes. */

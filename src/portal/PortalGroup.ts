@@ -1,5 +1,5 @@
 import Maid from "@rbxts/maid";
-import { CollectionService, Lighting, RunService, Workspace } from "@rbxts/services";
+import { CollectionService, Lighting, Players, RunService, Workspace } from "@rbxts/services";
 
 import type { PortalConfig, PortalGroupConfig } from "../types";
 import { Portal } from "./Portal";
@@ -42,6 +42,7 @@ export class PortalGroup {
 			autoDiscoverTag: config.autoDiscoverTag ?? "ImmersivePortal",
 			pairAttribute: config.pairAttribute ?? "PortalPair",
 			faceAttribute: config.faceAttribute ?? "PortalFace",
+			defaultPortalConfig: config.defaultPortalConfig ?? {},
 		};
 	}
 
@@ -104,13 +105,49 @@ export class PortalGroup {
 	}
 
 	/**
+	 * Convenience: track every player's character so they all appear in portal
+	 * viewports. Wires up Players.PlayerAdded + CharacterAdded with the standard
+	 * "wait for body parts + appearance" guard, and also attaches the LOCAL
+	 * player's Humanoid for teleport detection.
+	 *
+	 * Replaces the boilerplate consumers would otherwise write themselves.
+	 * Safe to call once at startup; covers already-joined players + future joins.
+	 */
+	trackAllPlayers(): void {
+		const localPlayer = Players.LocalPlayer;
+		const bind = (player: Player, character: Model) => {
+			character.WaitForChild("Humanoid");
+			character.WaitForChild("HumanoidRootPart");
+			if (!player.HasAppearanceLoaded()) player.CharacterAppearanceLoaded.Wait();
+			if (player === localPlayer) {
+				const humanoid = character.WaitForChild("Humanoid") as Humanoid;
+				this.setHumanoid(humanoid);
+			}
+			this.addCharacter(character);
+		};
+		const track = (player: Player) => {
+			this.maid.GiveTask(player.CharacterAdded.Connect((c) => bind(player, c)));
+			if (player.Character) task.spawn(bind, player, player.Character);
+		};
+		this.maid.GiveTask(Players.PlayerAdded.Connect(track));
+		for (const player of Players.GetPlayers()) track(player);
+	}
+
+	/**
 	 * Clone this instance (Model or Folder) into every owned portal's viewports.
 	 * You can pass `workspace` itself — Camera, Terrain, and any characters tracked
 	 * via `addCharacter` are automatically excluded so they don't clone twice.
 	 */
-	attachWorld(world: Instance): void {
+	setWorld(world: Instance): void {
 		this.world = world;
 		for (const portal of this.portals) portal.setWorld(world, this.characters);
+	}
+
+	/**
+	 * @deprecated Use `setWorld` instead — same behavior. Kept for back-compat.
+	 */
+	attachWorld(world: Instance): void {
+		this.setWorld(world);
 	}
 
 	/**
@@ -238,9 +275,12 @@ export class PortalGroup {
 
 		this.discoveredByPairKey.delete(key);
 
+		// Merge the group's defaultPortalConfig with per-pair overrides. Per-part
+		// attribute (PortalFace) wins over defaults for surfaceA/B.
 		const config: PortalConfig = {
-			surfaceA: this.faceFor(partner),
-			surfaceB: this.faceFor(part),
+			...this.config.defaultPortalConfig,
+			surfaceA: this.faceFor(partner) ?? this.config.defaultPortalConfig.surfaceA,
+			surfaceB: this.faceFor(part) ?? this.config.defaultPortalConfig.surfaceB,
 		};
 		const portal = new Portal(partner, part, config);
 		this.discoveredByPart.set(partner, portal);

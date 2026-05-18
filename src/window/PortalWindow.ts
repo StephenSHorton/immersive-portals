@@ -160,6 +160,15 @@ export class PortalWindow {
 			// inside a ViewportFrame at all).
 			if (real.IsA("Camera")) continue;
 			if (real.IsA("Terrain")) continue;
+			// Skip stateful effects on characters and props. Sounds clone in their
+			// current Playing state, ParticleEmitters keep emitting, Beams render
+			// stuck. None of these contribute to a viewport's visual purpose, and
+			// Sounds in particular cause "ghost footstep" loops when a character is
+			// cloned mid-stride.
+			if (real.IsA("Sound")) continue;
+			if (real.IsA("ParticleEmitter")) continue;
+			if (real.IsA("Beam")) continue;
+			if (real.IsA("Trail")) continue;
 			if (exclude?.has(real)) continue;
 			const wasArchivable = real.Archivable;
 			real.Archivable = true;

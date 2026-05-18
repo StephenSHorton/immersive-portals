@@ -1,5 +1,7 @@
 # @rbxts/immersive-portals
 
+![Two portals showing perspective-correct views into each other](./portal-img.png)
+
 Perspective-correct portal rendering for [roblox-ts](https://roblox-ts.com). Two paired surfaces become real-looking windows into each other — and walk through them to teleport.
 
 ```ts
@@ -12,15 +14,98 @@ import { Portal, PortalGroup, PortalWindow } from "@rbxts/immersive-portals";
 npm install @rbxts/immersive-portals
 ```
 
+## Quick start
+
+In a client controller (Flamework / vanilla LocalScript):
+
+```ts
+import { PortalGroup } from "@rbxts/immersive-portals";
+import { Workspace } from "@rbxts/services";
+
+const group = new PortalGroup({ autoDiscoverTag: "ImmersivePortal" });
+group.enableAutoDiscovery();
+group.setWorld(Workspace.WaitForChild("World"));
+group.trackAllPlayers();
+group.bind();
+```
+
+In Studio: drop two `BasePart`s in `Workspace`, tag both with `ImmersivePortal`, set a matching `PortalPair` string attribute on each. Done — they pair up and render.
+
+Everything visual in the portal viewport comes from `Workspace.World` (any name; whatever you pass to `setWorld`). Put your scenery in that folder, and the library clones it into each portal's `ViewportFrame` — keeping it auto-synced on `ChildAdded`/`ChildRemoved`.
+
+## How the World folder gets cloned
+
+```mermaid
+flowchart LR
+    subgraph WS["Workspace (real)"]
+        World["World (Folder)"]
+        PortalA["PortalA part<br/>tag: ImmersivePortal<br/>PortalPair: door"]
+        PortalB["PortalB part<br/>tag: ImmersivePortal<br/>PortalPair: door"]
+        World --> Floor[Floor]
+        World --> Walls[Walls]
+        World --> Props[Props]
+    end
+
+    PG["PortalGroup"]
+    PG -. "enableAutoDiscovery()" .-> PortalA
+    PG -. "enableAutoDiscovery()" .-> PortalB
+    PG -. "setWorld(World)" .-> World
+
+    subgraph Viewports["Per-portal ViewportFrames (cloned)"]
+        VA[WorldFrame A]
+        VB[WorldFrame B]
+    end
+    World -. "auto-cloned + synced" .-> VA
+    World -. "auto-cloned + synced" .-> VB
+```
+
+Add anything new to `World` at runtime — it appears in every portal's viewport automatically. Remove it — it disappears. The Camera, Terrain, and any character registered via `addCharacter` / `trackAllPlayers` are excluded automatically so they don't double-render.
+
 ## Three layers
+
+The library is composable. Most consumers only need `PortalGroup`. The lower layers are useful on their own — `PortalWindow` is a generic "magic window" (security cameras, fish tanks, magic mirrors).
+
+### `PortalGroup` — many portals, one render loop
+
+Auto-discovers tagged portal parts via CollectionService, shares one `RenderStepped` callback across all of them.
+
+```ts
+const group = new PortalGroup({
+  autoDiscoverTag: "ImmersivePortal",
+  pairAttribute: "PortalPair",
+  faceAttribute: "PortalFace", // optional integer NormalId per part
+  defaultPortalConfig: { teleportCooldown: 0.2 }, // applied to every discovered pair
+});
+group.enableAutoDiscovery();
+group.setWorld(Workspace.World);
+group.trackAllPlayers();
+group.bind();
+```
+
+### `Portal` — paired teleporter
+
+Two parts → two `PortalWindow`s plus the mirror-camera loop and teleport check.
+
+```ts
+const portal = new Portal(partA, partB, {
+  surfaceA: Enum.NormalId.Front,
+  surfaceB: Enum.NormalId.Front,
+  teleportCooldown: 0.1,
+});
+portal.setWorld(Workspace.PortalScene);
+portal.setHumanoid(Players.LocalPlayer.Character!.FindFirstChildOfClass("Humanoid"));
+portal.addCharacter(Players.LocalPlayer.Character!);
+portal.teleported.Connect((from, to) => print(`${from} → ${to}`));
+portal.bind();
+```
+
+`bind()` is only for standalone usage. Inside a `PortalGroup`, the group owns the render loop and calls `Portal.update` directly — don't bind individually.
 
 ### `PortalWindow` — render primitive
 
-Wraps a `SurfaceGui` + `ViewportFrame` on a part face and re-projects its internal camera each frame so the texture appears as a true window. Standalone-useful for magic mirrors, security cameras, fish tanks.
+A perspective-correct `ViewportFrame` on a part face. Standalone-useful.
 
 ```ts
-import { PortalWindow } from "@rbxts/immersive-portals";
-
 const window = PortalWindow.fromPart(part, Enum.NormalId.Front, part, {
   canvasSize: new Vector2(1024, 1024),
   lightingMode: "snapshot",
@@ -34,91 +119,39 @@ RunService.RenderStepped.Connect(() => {
 });
 ```
 
-### `Portal` — paired teleporter
+## Setup checklist
 
-Two parts → two `PortalWindow`s + the per-frame loop that mirrors the camera through each portal plane and teleports the character when they cross.
+The three things that will trip you up if you skip them:
 
-```ts
-import { Portal } from "@rbxts/immersive-portals";
+1. **Place portals as opposing doorways, not parallel walls.** The mirror math applies a 180° yaw flip (standard portal-game convention): walking *into* A means walking *out of* B's matching face. Portals facing each other = natural teleporter feel. Portals facing the same direction = the viewport shows what's *behind* the partner part instead, which is correct mirror math but counterintuitive.
+2. **Both portal parts need `tag = "ImmersivePortal"` and a matching `PortalPair` attribute** for auto-discovery. The library waits until both halves are tagged to actually build the portal.
+3. **The `SurfaceGui` ends up under `PlayerGui`, not on the part.** `ViewportFrame` content silently fails to render when the SurfaceGui is a direct child of a `BasePart` — only flat Frames render in that case. `PortalWindow.fromPart` handles this for you (`Adornee = part`, parent = `LocalPlayer.PlayerGui`, `ResetOnSpawn = false`).
 
-const portal = new Portal(partA, partB, {
-  surfaceA: Enum.NormalId.Front,
-  surfaceB: Enum.NormalId.Front,
-  teleportCooldown: 0.1,
-});
-portal.setWorld(Workspace.PortalScene);
-portal.setHumanoid(Players.LocalPlayer.Character!.FindFirstChildOfClass("Humanoid"));
-portal.addCharacter(Players.LocalPlayer.Character!);
-portal.teleported.Connect((from, to) => print(`${from} → ${to}`));
-portal.bind();
-```
+## Edge cases
 
-### `PortalGroup` — many portals, one render loop
+### Front face only
 
-Manages multiple portal pairs under a single shared `RenderStepped` binding. Supports auto-discovery via CollectionService.
+The library mounts the visible viewport on each part's Front face by default. Walk-through detection is bidirectional (you can enter from either face), but the back face renders as the bare part. Aim Front toward where players approach. Override per-part via the `PortalFace` integer attribute (a `NormalId` enum value).
 
-```ts
-import { PortalGroup } from "@rbxts/immersive-portals";
+### Character cloning timing
 
-const group = new PortalGroup({
-  autoDiscoverTag: "ImmersivePortal",
-  pairAttribute: "PortalPair",  // string attribute matching across the pair
-  faceAttribute: "PortalFace",  // optional integer NormalId per part
-});
-group.enableAutoDiscovery();
-group.setHumanoid(Players.LocalPlayer.Character!.FindFirstChildOfClass("Humanoid"));
-group.attachWorld(Workspace.PortalScene);
-group.bind();
-```
+`Player.CharacterAdded` fires before body parts and accessories replicate. Calling `addCharacter` immediately clones a Shirt+Humanoid stub. `trackAllPlayers()` does the right thing (waits for `Humanoid`, `HumanoidRootPart`, and `CharacterAppearanceLoaded`). If you wire it manually, do the same.
 
-Studio authoring: tag two `BasePart`s with `ImmersivePortal`, set the `PortalPair` attribute to the same string on both, optionally set `PortalFace`. Done.
+### Tag stripping on clones
 
-## Authoring gotchas
+`cloneInto` strips CollectionService tags from every clone it produces. ViewportFrame contents are display-only; leaving tags on them re-fires `GetInstanceAddedSignal` for the auto-discovery layer and cascades into exponential portal creation. If you need tagged clones for some reason, re-tag them inside `cloneFunc`.
 
-A short list of things that will burn you exactly once if you don't know them up front.
+### `World` can be a Folder or Model
 
-### Portal orientation
+Pass anything; `cloneInto` recurses its children. Top-level `ChildAdded`/`ChildRemoved` are auto-synced. Deep additions (descendants of an already-cloned subtree) are NOT — call `setWorld` again to re-snapshot.
 
-Each portal part has a Front face (the `+LookVector` side). The library mounts the `SurfaceGui` on that face by default. **Walk-through detection accepts entry from either face** — the segment-cross check is bidirectional — but the visual viewport only renders on the Front. If you stand in front of the Back face you'll see the unadorned part instead of the portal effect, even though walking into it still teleports you.
+### Stateful effects are skipped
 
-Place portals with their Fronts facing where players approach. In a script:
-```ts
-portalPart.CFrame = CFrame.lookAt(portalPart.Position, somewhereTowardSpawn);
-```
+`Sound`, `ParticleEmitter`, `Beam`, and `Trail` instances on cloned characters/scenery are skipped during clone. Sounds in particular would otherwise freeze in their current `Playing` state (no Humanoid to update them) and produce ghost footstep loops.
 
-### Mirror math assumes the "doorway" model
+### Remote-player teleport smoothing
 
-The internal mirror applies a 180° yaw flip (Y_SPIN), which is the standard portal-physics convention: walking INTO portal A means walking OUT of portal B, facing-direction inverted. For partner portals oriented to face each other ("doorways"), this gives the natural effect.
-
-If your partners face the SAME direction (parallel), the mirror still works but the viewport camera lands BEHIND the partner part — so the viewport shows whatever is on the partner's back side. **Put scenery there**, or the viewport will read as empty/sky-only.
-
-### Character cloning needs a fully loaded character
-
-`Player.CharacterAdded` fires the moment the Model is parented to Workspace, *before* body parts and accessories replicate. Calling `portal.addCharacter` at that instant clones a Shirt+Humanoid stub.
-
-```ts
-const bindCharacter = (character: Model) => {
-  character.WaitForChild("Humanoid");
-  character.WaitForChild("HumanoidRootPart");
-  if (!player.HasAppearanceLoaded()) player.CharacterAppearanceLoaded.Wait();
-  // now safe
-  for (const portal of group.getPortals()) portal.addCharacter(character);
-};
-```
-
-### SurfaceGui must be parented to PlayerGui
-
-`ViewportFrame` content does not render when its SurfaceGui is parented to a `BasePart` directly — only Frames render in that case. `PortalWindow.fromPart` already handles this by defaulting the parent to `LocalPlayer.PlayerGui`, but if you construct a `PortalWindow` from a pre-existing SurfaceGui, parent it under PlayerGui yourself. The library also sets `ResetOnSpawn = false` on the SurfaceGui so it survives respawns.
-
-### Tag stripping on cloned descendants
-
-`cloneInto` strips CollectionService tags from clones it produces. ViewportFrame contents are display-only; leaving tags on them re-fires `GetInstanceAddedSignal` for the auto-discovery layer and can cascade into an exponential portal-creation loop. If you want tagged clones, copy the tag back inside `cloneFunc`.
-
-### `World` for `attachWorld` can be a Folder or Model
-
-The signature accepts any `Instance`. The library clones its children recursively. Putting your portal scene in a `Folder` named `World` and pointing `attachWorld` at it is the simplest pattern.
-
-Top-level children added to the world after `attachWorld` are auto-synced via `ChildAdded`/`ChildRemoved`. Deep additions (descendants of an already-cloned subtree) are NOT — call `setWorld`/`attachWorld` again to re-snapshot those.
+Local-player teleport is instant (direct `HumanoidRootPart.CFrame` assignment). Other players' characters interpolate over Roblox's ~100ms character network smoothing — no engine API disables this. Listen for `portal.teleported` and broadcast a server-side snap if you need pixel-perfect remote teleports.
 
 ## Lighting
 
@@ -142,19 +175,17 @@ The Portal-game effect of one portal looking through itself into an infinite tun
 
 ## API surface
 
-Classes:
-- `PortalWindow`, `Portal`, `PortalGroup`
+**Classes:** `PortalWindow`, `Portal`, `PortalGroup`
 
-Pure functions:
-- `createSkyboxModel(sky | config)` — `Sky` or `SkyboxConfig` → 3-part skybox `Model`
+**Pure functions:**
+- `createSkyboxModel(sky | config)` — `Sky` or `SkyboxConfig` → 6-part skybox `Model`
 - `mirrorCFrameForCamera(cf, planeA, planeB)`, `mirrorCFrameForTeleport(cf, planeA, planeB)`
 - `rayPlane(origin, direction, planePoint, planeNormal)`
 - `segmentCrossesRect(from, to, planeCFrame, planeSize)` (one-way; used for camera-through-portal)
 - `segmentCrossesRectBidirectional(from, to, planeCFrame, planeSize)` (used for teleport)
 - `snapshotLighting()`, `resolveLighting(config)`, `applyLightingToFrame(frame, snapshot)`
 
-Types:
-- `WindowConfig`, `PortalConfig`, `PortalGroupConfig`, `SkyboxConfig`, `LightingMode`, `LightingSnapshot`
+**Types:** `WindowConfig`, `PortalConfig`, `PortalGroupConfig`, `SkyboxConfig`, `LightingMode`, `LightingSnapshot`
 
 ## License
 
