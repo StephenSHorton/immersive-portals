@@ -123,9 +123,8 @@ RunService.RenderStepped.Connect(() => {
 
 The three things that will trip you up if you skip them:
 
-1. **Place portals as opposing doorways, not parallel walls.** The mirror math applies a 180° yaw flip (standard portal-game convention): walking *into* A means walking *out of* B's matching face. Portals facing each other = natural teleporter feel. Portals facing the same direction = the viewport shows what's *behind* the partner part instead, which is correct mirror math but counterintuitive.
-2. **Both portal parts need `tag = "ImmersivePortal"` and a matching `PortalPair` attribute** for auto-discovery. The library waits until both halves are tagged to actually build the portal.
-3. **The `SurfaceGui` ends up under `PlayerGui`, not on the part.** `ViewportFrame` content silently fails to render when the SurfaceGui is a direct child of a `BasePart` — only flat Frames render in that case. `PortalWindow.fromPart` handles this for you (`Adornee = part`, parent = `LocalPlayer.PlayerGui`, `ResetOnSpawn = false`).
+1. **Both portal parts need `tag = "ImmersivePortal"` and a matching `PortalPair` attribute** for auto-discovery. The library waits until both halves are tagged to actually build the portal.
+2. **The `SurfaceGui` ends up under `PlayerGui`, not on the part.** `ViewportFrame` content silently fails to render when the SurfaceGui is a direct child of a `BasePart` — only flat Frames render in that case. `PortalWindow.fromPart` handles this for you (`Adornee = part`, parent = `LocalPlayer.PlayerGui`, `ResetOnSpawn = false`).
 
 ## Edge cases
 
