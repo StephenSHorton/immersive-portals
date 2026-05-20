@@ -121,7 +121,7 @@ RunService.RenderStepped.Connect(() => {
 
 ## Setup checklist
 
-The three things that will trip you up if you skip them:
+Two things that will trip you up:
 
 1. **Both portal parts need `tag = "ImmersivePortal"` and a matching `PortalPair` attribute** for auto-discovery. The library waits until both halves are tagged to actually build the portal.
 2. **The `SurfaceGui` ends up under `PlayerGui`, not on the part.** `ViewportFrame` content silently fails to render when the SurfaceGui is a direct child of a `BasePart` — only flat Frames render in that case. `PortalWindow.fromPart` handles this for you (`Adornee = part`, parent = `LocalPlayer.PlayerGui`, `ResetOnSpawn = false`).
